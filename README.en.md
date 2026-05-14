@@ -17,9 +17,35 @@ Taiwan's legal data is public. Open-sourcing this so nobody has to write the sam
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Install (via PyPI — recommended)
 
-Run these commands **in order**. Copy-paste runnable on Linux / macOS / WSL with Python 3.10+.
+```bash
+pip install mcp-taiwan-legal-db
+```
+
+> **Note for Debian / Ubuntu / WSL users**: the system Python is protected by PEP 668, so a bare `pip install` is blocked. Use one of:
+> - `pipx install mcp-taiwan-legal-db` (recommended — isolated venv, standard for Python CLI tools)
+> - or `pip install --user --break-system-packages mcp-taiwan-legal-db`
+
+After install, the `mcp-taiwan-legal-db` entry point is on your PATH. **Wire it into Claude Code** (available from any project):
+
+```bash
+claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
+```
+
+Then `/mcp` to reload, and Claude will pick up the 8 MCP tools on natural-language queries.
+
+**Optional — F5 WAF fallback**:
+
+```bash
+playwright install chromium    # only invoked when the Judicial Yuan WAF triggers; idle otherwise
+```
+
+---
+
+## Development setup
+
+If you want to clone, modify, and run tests:
 
 ```bash
 # 1. Clone the repo
@@ -59,7 +85,9 @@ If that prints without errors, you're done. The repo ships a `.mcp.json` at the 
 
 ## What you get
 
-Five MCP tools, all read-only, all hitting only public Taiwan government databases:
+Eight MCP tools, all read-only, all hitting only public Taiwan government databases.
+
+### Statutes and judgments
 
 | Tool | Purpose | Typical call |
 |---|---|---|
@@ -68,6 +96,14 @@ Five MCP tools, all read-only, all hitting only public Taiwan government databas
 | `query_regulation` | Query a regulation article / range / full text / amendment history | `query_regulation(law_name="民法", article_no="184")` |
 | `get_pcode` | Resolve regulation name → pcode (law code) | `get_pcode(law_name="律師法")` → `"I0020006"` |
 | `search_regulations` | Keyword search across 11,700+ regulations | `search_regulations(keyword="勞動")` |
+
+### Constitutional Court
+
+| Tool | Purpose | Typical call |
+|---|---|---|
+| `get_interpretation` | Full text of a Grand Justices interpretation (釋字) or Constitutional Court judgment (憲判字) — served from local cache | `get_interpretation("釋字748", reasoning_keyword="婚姻")` |
+| `search_interpretations` | Search 釋字 / 憲判字 (matches title + issue + reasoning full text) | `search_interpretations(keyword="集會自由")` |
+| `get_citations` | Citation graph: extract every 釋字 / 憲判字 cited in a given interpretation's reasoning | `get_citations("釋字748", include_context=True)` |
 
 ### Tool details
 
@@ -159,6 +195,69 @@ Keyword search across regulation names. Paginated (50 per page), current regulat
 search_regulations(keyword="勞動")
 search_regulations(keyword="勞動", offset=50)  # page 2
 search_regulations(keyword="消費", exclude_abolished=True)
+```
+</details>
+
+<details>
+<summary><b><code>get_interpretation</code></b></summary>
+
+Retrieves the full text of a Grand Justices interpretation (釋字 No. 1–813) or a Constitutional Court judgment (憲判字). The default tier is served instantly from a bundled JSON cache.
+
+**Layered design** (saves context):
+
+| Tier | Trigger | Offline? |
+|------|---------|----------|
+| Default (case ID / date / issue / interpretation text) | always returned | ✓ |
+| Reasoning excerpt by keyword | `reasoning_keyword="..."` | ✓ |
+| Full reasoning (up to 15,000 chars) | `include_reasoning=True` | ✓ |
+| Opinion excerpt by keyword | `opinions_keyword="..."` | ✓ |
+| Full opinions | `include_opinions=True` | ✓ |
+
+```python
+# Default tier (offline, ~0ms)
+get_interpretation("釋字748")
+
+# Search inside the reasoning for a keyword
+get_interpretation("釋字748", reasoning_keyword="婚姻自由")
+
+# Locate a particular Justice in the opinions
+get_interpretation("釋字499", opinions_keyword="林子儀")
+
+# Constitutional Court judgment under the new regime
+get_interpretation("111年憲判字第1號")
+```
+
+Recommended pattern: use the keyword-excerpt modes to locate the relevant passage first; only fall back to full text when needed.
+</details>
+
+<details>
+<summary><b><code>search_interpretations</code></b></summary>
+
+Searches Grand Justices interpretations and Constitutional Court judgments. The keyword matches the title, the issue statement, and the reasoning full text simultaneously.
+
+```python
+# Full-text search (across issue + reasoning)
+search_interpretations(keyword="集會自由")
+
+# Filter by year (post-2022 Constitutional Court judgments)
+search_interpretations(keyword="言論自由", year=112)
+
+# List the last 10 釋字 interpretations
+search_interpretations(number_from=804, number_to=813)
+```
+</details>
+
+<details>
+<summary><b><code>get_citations</code></b></summary>
+
+Extracts every prior 釋字 / 憲判字 cited in a given interpretation's reasoning. Direction: traces what the target *cited* (backward lookup).
+
+```python
+get_citations("釋字748")
+# → citations: [釋字第242號, 釋字第362號, 釋字第365號, ...]
+
+# Include an 80-character context window around each citation
+get_citations("釋字748", include_context=True)
 ```
 </details>
 

@@ -26,9 +26,35 @@
 
 ---
 
-## ⚡ 快速上手
+## ⚡ 安裝（PyPI，推薦）
 
-照順序執行下列指令。Linux / macOS / WSL + Python 3.10+ 可直接複製貼上。
+```bash
+pip install mcp-taiwan-legal-db
+```
+
+> **Debian / Ubuntu / WSL 注意**：系統 Python 受 PEP 668 保護，直接 `pip install` 會被擋。請改用：
+> - `pipx install mcp-taiwan-legal-db`（推薦，自動建隔離 venv，CLI tool 標準裝法）
+> - 或 `pip install --user --break-system-packages mcp-taiwan-legal-db`
+
+裝完後 entry point `mcp-taiwan-legal-db` 會在 PATH 上。**接到 Claude Code**（任何專案都能用）：
+
+```bash
+claude mcp add taiwan-legal-db mcp-taiwan-legal-db --scope user
+```
+
+接著 `/mcp` 重啟連線、Claude 就會在自然語言查詢時自動用 8 個 MCP tool。
+
+**選擇性 — F5 WAF fallback**：
+
+```bash
+playwright install chromium    # 僅在司法院 WAF 觸發時用，平時 idle
+```
+
+---
+
+## 開發環境設置
+
+下面是 clone 來修程式 / 跑測試的流程：
 
 ```bash
 # 1. Clone repo
