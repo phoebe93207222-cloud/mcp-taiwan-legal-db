@@ -30,7 +30,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 允許的域名（資安 allow-list，validate_url_domain 會拒絕其他所有 host）
 ALLOWED_DOMAINS = [
     "judgment.judicial.gov.tw",
-    "data.judicial.gov.tw",
     "law.moj.gov.tw",
 ]
 

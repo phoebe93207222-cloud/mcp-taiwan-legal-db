@@ -10,7 +10,7 @@
 - **全國法規資料庫** — law.moj.gov.tw（11,700+ 部法規）
 - **憲法法庭** — cons.judicial.gov.tw（868 筆大法官解釋 + 憲判字，含理由書全文，離線快取）
 
-以 Python 搭配 [FastMCP](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper 只打上述三個台灣官方來源，不會發送任何其他網路請求。
+以 Python 搭配 [FastMCP](https://github.com/modelcontextprotocol/python-sdk) 寫成。純工具 wrapper，只連線台灣政府官方來源（詳見下方「資料來源與統計」），不發送任何其他網路請求；憲法法庭資料為內建離線打包。
 
 ---
 
@@ -386,15 +386,16 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 ## 資料來源與統計
 
-所有資料都取自台灣政府**公開**資料庫。不會對外做其他網路呼叫：
+查詢時實際連網的，只有以下兩個台灣政府**公開**資料庫網域：
 
-| 來源 | 網域 | 說明 |
+| 來源 | 網域 | 用途 |
 |------|------|------|
-| 司法院裁判書系統 | judgment.judicial.gov.tw | 裁判書搜尋與全文 |
-| 司法院憲法法庭 | cons.judicial.gov.tw | 大法官解釋與憲判字 |
-| 全國法規資料庫 | law.moj.gov.tw | 法規條文與修法沿革 |
+| 司法院裁判書系統 | judgment.judicial.gov.tw | 裁判書搜尋與全文（`FJUD/Default_AD.aspx`、`data.aspx`） |
+| 全國法規資料庫 | law.moj.gov.tw | 法規條文與修法沿革（`LawClass/*`） |
 
-`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 強制執行。伺服器會拒絕抓取任何不在這些網域的 URL。
+`mcp_server/config.py:ALLOWED_DOMAINS` 以硬編碼 allow-list 強制執行（即上列兩個網域），伺服器會拒絕任何不在清單內的 URL。
+
+憲法法庭資料（釋字／憲判字）**不在查詢時連網取得** — 它是離線打包的（`old_cases.json`／`new_cases.json`），來源為 `cons.judicial.gov.tw`，由維護腳本離線重建。詳見 [SOURCES.md](SOURCES.md)。
 
 ### 憲法法庭資料統計
 

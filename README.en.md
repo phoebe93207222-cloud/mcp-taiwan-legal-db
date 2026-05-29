@@ -6,14 +6,27 @@ A Model Context Protocol (MCP) server that gives any MCP-compatible AI assistant
 
 - **Judicial Yuan judgments** — judgment.judicial.gov.tw (full-text search + get)
 - **National regulation database** — law.moj.gov.tw (11,700+ laws and ordinances)
+- **Constitutional Court** — 868 Grand Justices interpretations (釋字) and Constitutional Court judgments (憲判字), with full reasoning text, served offline from a bundled cache
 
-Written in Python with [FastMCP](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — no network calls outside the two official Taiwan government sources above.
+Written in Python with [FastMCP](https://github.com/modelcontextprotocol/python-sdk). Pure tool wrapper — it makes no network calls outside the official Taiwan government sources listed under [Data sources](#data-sources).
 
 ---
 
 ## Why we open-sourced this
 
 Taiwan's legal data is public. Open-sourcing this so nobody has to write the same scraper twice.
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **8 MCP tools** | Judgment search / full text, regulation queries, 釋字 / 憲判字 lookup, citation graph |
+| **Offline cache** | 868 Grand Justices interpretations and Constitutional Court judgments (with full reasoning / opinion text) served instantly from bundled JSON |
+| **Citation graph** | Extracts every 釋字 / 憲判字 cited in an interpretation's reasoning, for tracing the evolution of constitutional doctrine |
+| **Full-text search** | Keyword search over judgments + 釋字 issue / reasoning full text |
+| **Hybrid request strategy** | httpx direct by default (~0.25s); auto-falls back to Playwright to clear the Judicial Yuan F5 WAF, then resumes |
 
 ---
 
@@ -114,6 +127,7 @@ Searches the Judicial Yuan judgment system. Supports:
 
 - **Precise case number lookup** (fast, HTTP GET): set `case_word` + `case_number` + `year_from`
 - **Full-text keyword search**: set `keyword`
+- **Main-text filter**: `main_text="被告應將 移轉"` + `keyword="借名登記"` → narrows to cases where the defendant was ordered to transfer (i.e. lost)
 - Filter by `court`, `case_type` (民事/刑事/行政/懲戒), `year_from`/`year_to`
 - Returns results auto-sorted by court authority (最高 → 高等 → 地方)
 
@@ -263,6 +277,19 @@ get_citations("釋字748", include_context=True)
 
 ---
 
+## Example prompts
+
+```
+"Look up Article 184 of the Civil Code"
+"Find Supreme Court judgments about delayed delivery of pre-sale housing"
+"What are the key points in the reasoning of Interpretation No. 748?"
+"Which Grand Justices interpretations discuss freedom of assembly?"
+"Which earlier interpretations did Interpretation No. 748 cite?"
+"Look up 111 年憲判字第 1 號"
+```
+
+---
+
 ## Registering with your Claude client
 
 Pick the section that matches the Claude client you use.
@@ -369,6 +396,9 @@ Want to drive these tools from an A2A agent? See [`examples/agno-bindu/`](exampl
 **MCP client reports "server failed to start"**
 → Run the verify command from Quick Start step 4 directly. If it fails, the import chain is broken — read the traceback. If it passes, the issue is in the MCP client's launch configuration (wrong path, wrong cwd).
 
+**`ssl.SSLCertVerificationError: ... Missing Subject Key Identifier`**
+→ This is OpenSSL 3.6+ broadly rejecting the TWCA Global Root CA — **not a stale-`certifi` problem**. This repo uses [`truststore`](https://github.com/sethmlarson/truststore) so Python validates against the OS-native trust store (macOS Security framework, Windows CryptoAPI, Linux system CA), keeping **full SSL verification (`verify=True`) on every path** — it never uses `verify=False`. This works on macOS, Windows, and Linux with OpenSSL <3.6. Linux with OpenSSL 3.6+ (Fedora 40+, future Ubuntu LTS) may still be affected — issue reports welcome.
+
 ---
 
 ## WAF Handling
@@ -388,13 +418,23 @@ This project uses a hybrid strategy:
 
 ## Data sources
 
-All data is fetched from **public** Taiwan government databases. No other network calls are made:
+Live queries go to two **public** Taiwan government domains:
 
-- `judgment.judicial.gov.tw` — Judicial Yuan judgment database
-- `data.judicial.gov.tw` — Judicial Yuan open data API
-- `law.moj.gov.tw` — Ministry of Justice national regulation database
+| Source | Domain | Used for |
+|--------|--------|----------|
+| Judicial Yuan judgment system | judgment.judicial.gov.tw | Judgment search + full text (`FJUD/Default_AD.aspx`, `data.aspx`) |
+| National regulation database | law.moj.gov.tw | Regulation articles + amendment history (`LawClass/*`) |
 
-`mcp_server/config.py:ALLOWED_DOMAINS` enforces this as a hard allow-list. The server refuses to fetch any URL outside these domains.
+`mcp_server/config.py:ALLOWED_DOMAINS` enforces a hard allow-list of exactly these two domains — the server refuses any URL outside them.
+
+The Constitutional Court corpus (釋字 / 憲判字) is **not** fetched at query time — it is bundled offline (`old_cases.json` / `new_cases.json`), originally sourced from `cons.judicial.gov.tw` and regenerated by a maintainer-run script. See [SOURCES.md](SOURCES.md).
+
+### Constitutional Court data
+
+| Dataset | Records | With reasoning | With opinions | Size |
+|---------|---------|----------------|---------------|------|
+| Grand Justices interpretations (`old_cases.json`) | 813 | 734 | 370 | 7.4 MB |
+| Constitutional Court judgments (`new_cases.json`) | 55 | 55 | 55 | 1.8 MB |
 
 ## Caching
 
@@ -404,6 +444,7 @@ All data is fetched from **public** Taiwan government databases. No other networ
 | Search results | 24 hours | same |
 | Regulation articles | 7 days | same |
 | pcode metadata | 30 days | same |
+| 釋字 / 憲判字 | bundled JSON (never expires) | `mcp_server/data/old_cases.json`, `new_cases.json` |
 
 Flush everything: delete `mcp_server/data/cache/legal_mcp.db`. The cache file is in `.gitignore`.
 
@@ -424,25 +465,31 @@ Manual refresh:
 mcp-taiwan-legal-db/
 ├── .gitignore
 ├── .mcp.json              # Auto-registration for in-folder Claude Code sessions
-├── LICENSE                # MIT
+├── LICENSE                # MIT (code)
+├── DATA_LICENSE           # CC0 1.0 (Constitutional Court data)
+├── SOURCES.md             # Data provenance
+├── CITATION.cff           # Academic citation metadata
 ├── README.md              # 繁體中文 (primary)
 ├── README.en.md           # This file (English)
 ├── pyproject.toml         # Package metadata and deps
 └── mcp_server/
     ├── __init__.py
-    ├── server.py          # FastMCP entry — defines the 5 @mcp.tool() functions
+    ├── server.py          # FastMCP entry — defines the 8 @mcp.tool() functions
     ├── config.py          # URLs, court codes, cache TTLs, allowed domains
     ├── updater.py         # Standalone pcode_all.json refresh script
     ├── cache/db.py        # SQLite cache layer
     ├── data/
     │   ├── pcode_all.json          # 11,700+ regulations (bundled, ~780 KB)
-    │   └── law_histories.json      # Amendment history (bundled, ~9.6 MB)
+    │   ├── law_histories.json      # Amendment history (bundled, ~9.6 MB)
+    │   ├── old_cases.json          # 813 Grand Justices interpretations, full text (bundled, ~7.4 MB)
+    │   └── new_cases.json          # 55 Constitutional Court judgments, full text (bundled, ~1.8 MB)
     ├── models/            # Judgment / Regulation dataclasses
     ├── parsers/           # HTML parsers for judgment and regulation pages
     ├── tools/
     │   ├── judicial_search.py      # search_judgments
     │   ├── judicial_doc.py         # get_judgment
-    │   └── regulations.py          # query_regulation, get_pcode, search_regulations
+    │   ├── regulations.py          # query_regulation, get_pcode, search_regulations
+    │   └── constitutional_court.py # get_interpretation, search_interpretations, get_citations
     └── tests/             # pytest suite
 ```
 
@@ -467,7 +514,12 @@ Best-effort maintenance — we keep upstream (Judicial Yuan, Ministry of Justice
 
 ## License
 
-[MIT](LICENSE)
+**Code**: [MIT License](LICENSE)
+
+**Constitutional Court data**: [CC0 1.0](DATA_LICENSE) (public-domain dedication) — free to use, modify, and redistribute with no permission or attribution required. For academic citation, see [CITATION.cff](CITATION.cff).
+
+Judgment and regulation data sources: [Judicial Yuan](https://judgment.judicial.gov.tw) and [Ministry of Justice](https://law.moj.gov.tw) (public government data).
+Constitutional Court data source: [Judicial Yuan Constitutional Court](https://cons.judicial.gov.tw) (public domain under Article 9 of the ROC Copyright Act). See [SOURCES.md](SOURCES.md).
 
 ## Disclaimer
 

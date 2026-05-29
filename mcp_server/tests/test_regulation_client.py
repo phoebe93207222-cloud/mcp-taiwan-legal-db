@@ -46,7 +46,6 @@ class TestResolvePcode:
 class TestUrlWhitelist:
     @pytest.mark.parametrize("url", [
         "https://judgment.judicial.gov.tw/FJUD/data.aspx?id=x",
-        "https://data.judicial.gov.tw/anything",
         "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=B0000001",
     ])
     def test_allowed(self, url):
@@ -57,7 +56,7 @@ class TestUrlWhitelist:
         "http://169.254.169.254/latest/meta-data/",
         "https://judgment.judicial.gov.tw.evil.com/",
         "file:///etc/passwd",
-        "https://judicial.gov.tw/",  # 缺 judgment/data prefix
+        "https://judicial.gov.tw/",  # 缺 judgment 前綴
         # 非 http(s) scheme 即便打到白名單 host 也必須拒絕：
         "ftp://judgment.judicial.gov.tw/FJUD/data.aspx",
         "gopher://judgment.judicial.gov.tw/1",
