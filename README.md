@@ -344,6 +344,12 @@ Claude Cowork 跑在 Claude Desktop 裡面，**共用同一個 `claude_desktop_c
 
 ---
 
+## 在這個 server 上面建 A2A agent
+
+想用 A2A agent 驅動這些工具？請見 [`examples/agno-bindu/`](examples/agno-bindu/) — 一個社群貢獻的 A2A agent 範例。
+
+---
+
 ## 疑難排解
 
 **`ModuleNotFoundError: No module named 'mcp_server'`**

@@ -349,6 +349,12 @@ Any MCP client that follows the [Model Context Protocol specification](https://m
 
 ---
 
+## Build an A2A agent on top of this server
+
+Want to drive these tools from an A2A agent? See [`examples/agno-bindu/`](examples/agno-bindu/) — a community-contributed A2A agent example.
+
+---
+
 ## Troubleshooting
 
 **`ModuleNotFoundError: No module named 'mcp_server'`**
