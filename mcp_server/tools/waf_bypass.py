@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -16,6 +18,39 @@ logger = logging.getLogger(__name__)
 
 _COOKIE_FILE = Path(__file__).parent.parent / "data" / ".judicial_cookies.json"
 _WARMUP_URL = "https://judgment.judicial.gov.tw/FJUD/Default_AD.aspx"
+
+
+def _is_missing_browser_error(exc: Exception) -> bool:
+    """判斷 Playwright 例外是否為「瀏覽器 binary 未安裝」。"""
+    msg = str(exc).lower()
+    return "executable doesn't exist" in msg or "playwright install" in msg
+
+
+def _install_chromium() -> bool:
+    """自動安裝 Chromium（裝到使用者快取 ~/.cache/ms-playwright，一次性）。
+
+    用 sys.executable -m playwright，確保用的是當前環境（含 uvx 臨時環境）的
+    Playwright，而非 PATH 上可能不存在的 playwright 執行檔。
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except Exception as e:  # 安裝失敗一律降級為手動提示
+        logger.error("WAF bypass: 自動安裝 Chromium 發生例外：%s", e)
+        return False
+    if proc.returncode != 0:
+        logger.error(
+            "WAF bypass: playwright install chromium 失敗 (rc=%d)：%s",
+            proc.returncode,
+            (proc.stderr or proc.stdout or "").strip()[:500],
+        )
+        return False
+    logger.info("WAF bypass: Chromium 安裝完成")
+    return True
 
 
 class WAFPermanentBlockError(RuntimeError):
@@ -95,6 +130,7 @@ class JudicialWAFBypass:
     async def _run_warmup(self) -> None:
         try:
             from playwright.async_api import (
+                Error as PlaywrightError,
                 TimeoutError as PlaywrightTimeoutError,
                 async_playwright,
             )
@@ -107,45 +143,66 @@ class JudicialWAFBypass:
         logger.info("WAF bypass: running Playwright warmup...")
         t0 = time.time()
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            try:
+                await self._warmup_with(async_playwright, t0)
+            except PlaywrightTimeoutError:
+                raise
+            except PlaywrightError as e:
+                # 瀏覽器 binary 缺失（首次以 uvx / pip 安裝後尚未 playwright
+                # install 時最常見）：自動補裝 Chromium 後重試一次，使用者零手動設定。
+                if not _is_missing_browser_error(e):
+                    raise
+                logger.warning(
+                    "WAF bypass: Chromium 未安裝，首次執行自動安裝中"
+                    "（約 150MB，僅一次）…"
                 )
-                try:
-                    ctx = await browser.new_context(
-                        locale="zh-TW",
-                        timezone_id="Asia/Taipei",
-                        user_agent=(
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/120.0.0.0 Safari/537.36"
-                        ),
-                    )
-                    page = await ctx.new_page()
-                    await page.goto(
-                        _WARMUP_URL, wait_until="domcontentloaded", timeout=60000
-                    )
-                    # 等真表單出現（代表 F5 挑戰已過）
-                    try:
-                        await page.wait_for_selector("#btnQry", state="visible", timeout=15000)
-                    except Exception:
-                        logger.warning("WAF bypass: #btnQry 未顯示，cookies 可能仍無效")
-                    cookies = await ctx.cookies()
-                    self._cookies = {c["name"]: c["value"] for c in cookies}
-                    self._last_warmup_at = time.time()
-                    self._save_to_disk()
-                    elapsed = time.time() - t0
-                    logger.info(
-                        "WAF bypass: warmup OK in %.1fs, got %d cookies",
-                        elapsed, len(self._cookies),
-                    )
-                finally:
-                    await browser.close()
+                if not _install_chromium():
+                    raise RuntimeError(
+                        "Chromium 自動安裝失敗，請手動執行：playwright install chromium"
+                    ) from e
+                await self._warmup_with(async_playwright, t0)
         except PlaywrightTimeoutError as e:
             # 將 Playwright 專屬例外收斂成 stdlib asyncio.TimeoutError，
             # 讓上游 search handler 不必依賴 Playwright 型別。
             raise asyncio.TimeoutError("WAF warmup 逾時") from e
+
+    async def _warmup_with(self, async_playwright, t0: float) -> None:
+        """實際跑一次 Playwright warmup（拆出以便瀏覽器缺失時自動安裝後重試）。"""
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+            )
+            try:
+                ctx = await browser.new_context(
+                    locale="zh-TW",
+                    timezone_id="Asia/Taipei",
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    ),
+                )
+                page = await ctx.new_page()
+                await page.goto(
+                    _WARMUP_URL, wait_until="domcontentloaded", timeout=60000
+                )
+                # 等真表單出現（代表 F5 挑戰已過）
+                try:
+                    await page.wait_for_selector("#btnQry", state="visible", timeout=15000)
+                except Exception:
+                    logger.warning("WAF bypass: #btnQry 未顯示，cookies 可能仍無效")
+                cookies = await ctx.cookies()
+                self._cookies = {c["name"]: c["value"] for c in cookies}
+                self._last_warmup_at = time.time()
+                self._save_to_disk()
+                elapsed = time.time() - t0
+                logger.info(
+                    "WAF bypass: warmup OK in %.1fs, got %d cookies",
+                    elapsed, len(self._cookies),
+                )
+            finally:
+                await browser.close()
 
     @staticmethod
     def is_blocked(response_text: str) -> bool:
