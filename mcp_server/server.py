@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
 
+from mcp.server.transport_security import TransportSecuritySettings
+
 from mcp_server.cache.db import CacheDB
 from mcp_server.tools._errors import error_response
 from mcp_server.tools.regulations import RegulationClient
@@ -67,40 +69,32 @@ def _log_background_task_exception(task: asyncio.Task) -> None:
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
-    """伺服器生命週期：啟動時初始化，關閉時清理"""
+    """伺服器生命週期：Render/ChatGPT SSE 連線可能重複開關，避免重複關閉全域資源。"""
     global cache, reg_client, jud_search, jud_doc, waf
-
-    # 啟動
-    cache = CacheDB()
-    await cache.initialize()
-    await cache.cleanup_expired()
-    await cache.cleanup_invalid_regulation_names()
-
-    waf = JudicialWAFBypass()
-    reg_client = RegulationClient(cache)
-    jud_search = JudicialSearchClient(cache, waf)
-    jud_doc = JudgmentDocClient(cache, waf)
-
+    
+    if cache is None:
+        cache = CacheDB()
+        await cache.initialize()
+        await cache.cleanup_expired()
+        await cache.cleanup_invalid_regulation_names()
+        
+    if waf is None:
+        waf = JudicialWAFBypass()
+        
+    if reg_client is None:
+        reg_client = RegulationClient(cache)
+        
+    if jud_search is None:
+        jud_search = JudicialSearchClient(cache, waf)
+        
+    if jud_doc is None:
+        jud_doc = JudgmentDocClient(cache, waf)
+        
     logger.info("台灣法律資料庫 MCP Server 已啟動")
-
-    _pcode_task = asyncio.create_task(
-        _maybe_update_pcode_all(), name="pcode_all_update"
-    )
-    _pcode_task.add_done_callback(_log_background_task_exception)
-
-    # WAF cookies 預熱：沒預熱的話，第一個請求會在 search handler 內同步等
-    # Playwright warmup，使用者看到的只會是籠統的「搜尋逾時」。
-    _waf_task = asyncio.create_task(waf.ensure_ready(), name="waf_warmup")
-    _waf_task.add_done_callback(_log_background_task_exception)
-
+    
     yield
-
-    # 關閉
-    await reg_client.close()
-    await jud_search.close()
-    await jud_doc.close()
-    await cache.close()
-    logger.info("MCP Server 已關閉")
+    
+    logger.info("MCP Server lifespan ended; keeping global resources alive")
 
 
 # 建立 FastMCP 伺服器
@@ -111,8 +105,24 @@ mcp = FastMCP(
         "釋字/憲判字預設層與理由書從本地快取即時回傳，無需連網。"
     ),
     lifespan=lifespan,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+            "你的-render-網址.onrender.com",
+            "你的-render-網址.onrender.com:*",
+        ],
+        allowed_origins=[
+            "http://localhost:*",
+            "https://你的-render-網址.onrender.com",
+            "https://chatgpt.com",
+            "https://chat.openai.com",
+        ],
+    ),
 )
-
 
 # ============================================================
 # 工具 1：搜尋裁判書
