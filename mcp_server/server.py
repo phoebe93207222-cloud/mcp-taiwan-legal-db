@@ -112,8 +112,8 @@ mcp = FastMCP(
             "localhost:*",
             "127.0.0.1",
             "127.0.0.1:*",
-            "https://my-taiwan-legal-db.onrender.com",
-            "https://my-taiwan-legal-db.onrender.com:*",
+            "my-taiwan-legal-db.onrender.com",
+            "my-taiwan-legal-db.onrender.com:*",
         ],
         allowed_origins=[
             "http://localhost:*",
